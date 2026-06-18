@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 
 import numpy as np
 import timm
@@ -33,8 +34,13 @@ class CoVLATrajectory(Dataset):
     def __getitem__(self, i):
         r = self.items[i]
         img = Image.open(os.path.join(self.root, r["img"])).convert("RGB")
+        wp = torch.tensor(r["waypoints"], dtype=torch.float32)  # (n,2) x_fwd, y_left
+        # mirror augmentation: flip L<->R and negate lateral target -> kills left/right bias
+        if self.augment and random.random() < 0.5:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            wp = wp.clone()
+            wp[:, 1] = -wp[:, 1]
         x = self.transform(img)
-        wp = torch.tensor(r["waypoints"], dtype=torch.float32)  # (n,2)
         speed = torch.tensor(r["speed"], dtype=torch.float32)
         valid = torch.ones(wp.size(0), dtype=torch.float32)
         return {"image": x, "speed": speed, "waypoints": wp, "valid": valid}

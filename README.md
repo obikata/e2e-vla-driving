@@ -50,11 +50,14 @@ python sim/closed_loop.py --ckpt checkpoints/best.pt
 
 ## Status
 - [x] D1 env + GPU (Blackwell) + data pipeline + label sanity check
-- [ ] D2 train policy, offline ADE
-- [ ] D3 CARLA closed-loop
-- [ ] D4 sim-domain stabilization
+- [x] D2 train policy, offline ADE (best val ADE 0.786 m)
+- [x] D3 CARLA closed-loop (upgraded to CARLA 0.10 / Unreal Engine 5.5)
+- [~] D4 sim-domain adaptation — see [EXPERIMENTS.md](EXPERIMENTS.md); v2 cruises ~22 km/h,
+  next: stop at red lights
 - [ ] D5 Alpamayo distillation + reasoning overlay
 - [ ] D6 demo polish
+
+See [EXPERIMENTS.md](EXPERIMENTS.md) for the model-version evolution and metrics.
 
 ## License
 MIT (see [LICENSE](LICENSE)). Applies only to the original source here; CoVLA / CARLA / Alpamayo are third-party and not redistributed.

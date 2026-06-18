@@ -58,8 +58,20 @@ def evaluate(model, loader, device):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=os.path.join(HERE, "configs", "train.yaml"))
+    ap.add_argument("--init", default=None, help="checkpoint to warm-start from (fine-tuning)")
+    ap.add_argument("--data-root", default=None, help="override cfg data_root")
+    ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--lr", type=float, default=None)
+    ap.add_argument("--tag", default="", help="checkpoint name suffix, e.g. 'carla' -> best_carla.pt")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    if args.data_root:
+        cfg["data_root"] = args.data_root
+    if args.epochs:
+        cfg["epochs"] = args.epochs
+    if args.lr:
+        cfg["lr"] = args.lr
+    suffix = f"_{args.tag}" if args.tag else ""
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.backends.cudnn.benchmark = True
@@ -73,6 +85,10 @@ def main():
                         num_workers=4, pin_memory=True)
 
     model = build_model(cfg).to(device)
+    if args.init:
+        sd = torch.load(args.init, map_location=device)["model"]
+        model.load_state_dict(sd)
+        print(f"warm-started from {args.init}")
     opt = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg.get("wd", 1e-4))
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=cfg["lr"], epochs=cfg["epochs"], steps_per_epoch=len(train_ld))
@@ -101,11 +117,11 @@ def main():
         dt = time.time() - t0
         print(f"== epoch {ep} done in {dt:.0f}s | val ADE {ade:.3f} m ==")
         ckpt = {"model": model.state_dict(), "cfg": cfg, "epoch": ep, "val_ade": ade}
-        torch.save(ckpt, os.path.join(HERE, "checkpoints", "last.pt"))
+        torch.save(ckpt, os.path.join(HERE, "checkpoints", f"last{suffix}.pt"))
         if ade < best:
             best = ade
-            torch.save(ckpt, os.path.join(HERE, "checkpoints", "best.pt"))
-            print(f"  new best ADE {best:.3f} m -> checkpoints/best.pt")
+            torch.save(ckpt, os.path.join(HERE, "checkpoints", f"best{suffix}.pt"))
+            print(f"  new best ADE {best:.3f} m -> checkpoints/best{suffix}.pt")
 
 
 if __name__ == "__main__":

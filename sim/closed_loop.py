@@ -37,7 +37,8 @@ def pure_pursuit_steer(waypoints, wheelbase=2.8, lookahead=6.0, max_steer_rad=0.
     # bicycle pure pursuit: curvature = 2*y / Ld^2 ; steer angle = atan(wheelbase*curv)
     curv = 2.0 * ty / (Ld * Ld)
     angle = math.atan(wheelbase * curv)
-    return float(np.clip(angle / max_steer_rad, -1.0, 1.0))
+    # waypoints use y_left>0 = left; CARLA steer is +right/-left, so negate
+    return float(np.clip(-angle / max_steer_rad, -1.0, 1.0))
 
 
 def speed_target_from_traj(waypoints, dt_horizon):
@@ -57,6 +58,8 @@ def main():
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--out", default=os.path.join(HERE, "assets", "carla_run.mp4"))
+    ap.add_argument("--ego", default="vehicle.lincoln.mkz",
+                    help="ego blueprint; UE5 0.10 has no Tesla, so we fall back")
     args = ap.parse_args()
 
     import carla  # imported here so the rest of the repo doesn't require it
@@ -75,8 +78,11 @@ def main():
     horizon_s = cfg["horizon_s"]
 
     client = carla.Client(args.host, args.port)
-    client.set_timeout(20.0)
-    world = client.load_world(args.town)
+    client.set_timeout(60.0)
+    # reuse the already-loaded world if it matches (avoids fragile reload after boot)
+    world = client.get_world()
+    if args.town not in world.get_map().name:
+        world = client.load_world(args.town)
     # synchronous, fixed dt
     settings = world.get_settings()
     settings.synchronous_mode = True
@@ -84,7 +90,16 @@ def main():
     world.apply_settings(settings)
 
     bp = world.get_blueprint_library()
-    ego_bp = bp.find("vehicle.tesla.model3")  # Tesla ego (narrative bonus)
+    # pick ego with fallback (UE5 0.10 dropped branded vehicles incl. Tesla)
+    ego_bp = None
+    for cand in [args.ego, "vehicle.lincoln.mkz", "vehicle.nissan.patrol"]:
+        found = bp.filter(cand)
+        if found:
+            ego_bp = found[0]
+            break
+    if ego_bp is None:
+        ego_bp = bp.filter("vehicle.*")[0]
+    print("ego:", ego_bp.id)
     sp = world.get_map().get_spawn_points()
     ego = world.spawn_actor(ego_bp, sp[0])
 
@@ -100,6 +115,13 @@ def main():
     cam.listen(lambda im: latest.__setitem__(
         "img", np.frombuffer(im.raw_data, np.uint8).reshape(im.height, im.width, 4)[:, :, :3][:, :, ::-1].copy()))
 
+    # collision sensor + distance tracking for objective before/after metrics
+    col_bp = bp.find("sensor.other.collision")
+    col = world.spawn_actor(col_bp, carla.Transform(), attach_to=ego)
+    metrics = {"collisions": 0, "dist": 0.0, "speeds": []}
+    col.listen(lambda e: metrics.__setitem__("collisions", metrics["collisions"] + 1))
+    prev_loc = ego.get_location()
+
     vw = cv2.VideoWriter(args.out, cv2.VideoWriter_fourcc(*"mp4v"), int(1 / args.dt), (960 + 600, 600))
     n_steps = int(args.seconds / args.dt)
     print(f"running {n_steps} steps in {args.town} ...")
@@ -114,6 +136,10 @@ def main():
             t = (t - mean) / std
             v = ego.get_velocity()
             speed = math.hypot(v.x, v.y)
+            loc = ego.get_location()
+            metrics["dist"] += math.hypot(loc.x - prev_loc.x, loc.y - prev_loc.y)
+            prev_loc = loc
+            metrics["speeds"].append(speed)
             out = model(t, torch.tensor([speed], device=device))
             wp = out["waypoints"][0].cpu().numpy()  # (N,2)
 
@@ -131,7 +157,11 @@ def main():
                         (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             vw.write(np.hstack([frame, bev]))
     finally:
+        ms = metrics["speeds"] or [0]
+        print(f"METRICS ckpt={os.path.basename(args.ckpt)} | distance={metrics['dist']:.1f} m | "
+              f"collisions={metrics['collisions']} | mean_speed={sum(ms)/len(ms):.1f} m/s")
         vw.release()
+        col.destroy()
         cam.destroy()
         ego.destroy()
         settings.synchronous_mode = False

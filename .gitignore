@@ -22,6 +22,7 @@ assets/
 
 # --- CARLA install (huge, redistributed — downloaded separately) ---
 carla/
+carla-ue5/
 
 # --- model checkpoints (large binaries) ---
 checkpoints/
