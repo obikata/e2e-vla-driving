@@ -1,0 +1,22 @@
+# data
+data_root: data/covla_mini
+fps: 20                 # CoVLA capture rate
+horizon_s: 2.0         # predict 2s of future
+n_waypoints: 10        # -> one every 0.2s
+val_frac: 0.1
+frame_stride: 5        # subsample frames within a clip to cut redundancy
+img_source: mp4        # 'mp4' (light) or 'images' (full-res tar.gz)
+
+# model
+backbone: resnet34     # try vit_small_patch14_dinov2.lvd142m for robustness later
+use_speed: true
+pretrained: true
+feat_dim: 256
+
+# optim
+batch_size: 64
+lr: 0.0006
+wd: 0.0001
+epochs: 15
+num_workers: 8
+log_every: 50

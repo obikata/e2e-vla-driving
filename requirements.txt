@@ -1,0 +1,11 @@
+# torch installed separately from cu128 index (Blackwell sm_120)
+huggingface_hub>=0.24
+numpy
+pandas
+opencv-python
+av
+timm
+einops
+matplotlib
+tqdm
+pyyaml

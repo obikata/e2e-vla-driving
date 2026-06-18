@@ -1,0 +1,32 @@
+# ============================================================================
+#  STRICT IGNORE.
+#  NEVER commit: the CoVLA dataset or anything derived from it (it is a
+#  licensed/gated dataset), the CARLA install (redistributed binaries), model
+#  weights, or generated media. Commit ONLY our own source + docs + config.
+# ============================================================================
+
+# --- Python / env ---
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# --- CoVLA dataset & ANYTHING derived from it (licensed/gated) ---
+data/
+*.mp4
+*.jsonl
+*.tar.gz
+
+# --- generated media & sanity images (contain CoVLA frames) ---
+assets/
+
+# --- CARLA install (huge, redistributed — downloaded separately) ---
+carla/
+
+# --- model checkpoints (large binaries) ---
+checkpoints/
+*.pt
+
+# --- logs / misc ---
+*.log
+.DS_Store
