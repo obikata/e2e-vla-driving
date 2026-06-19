@@ -37,6 +37,10 @@ def main():
     ap.add_argument("--stride", type=int, default=2)      # keep every 2nd frame for training
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--ego", default="vehicle.lincoln.mkz")
+    ap.add_argument("--stop-thresh", type=float, default=1.0,
+                    help="future path length below this (m) = a 'stopped' frame (e.g. red light)")
+    ap.add_argument("--keep-stop-every", type=int, default=3,
+                    help="keep 1 in N stopped frames so the policy learns to stop without flooding")
     args = ap.parse_args()
     import carla
 
@@ -121,6 +125,7 @@ def main():
         world_xyz = np.array(img_idx)  # (T,3)
         T = len(world_xyz)              # actual collected ticks (may be < n_ticks if stalled)
         items = []
+        n_stop_seen, n_stop_kept = 0, 0
         for t in range(0, T, args.stride):
             if t + H >= T:
                 continue
@@ -133,9 +138,12 @@ def main():
             homog = np.concatenate([fut, np.ones((len(fut), 1))], axis=1)  # (n,4)
             local = (M_inv @ homog.T).T[:, :3]          # ego-local: x fwd, y right, z up
             wp = np.stack([local[:, 0], -local[:, 1]], axis=1)  # -> x_fwd, y_left (CoVLA)
-            # skip near-stationary frames (autopilot stopped at light) to avoid degenerate labels
-            if np.linalg.norm(wp[-1]) < 1.0:
-                continue
+            # KEEP stopped frames (red lights / yields) but subsample so they don't flood the set
+            if np.linalg.norm(wp[-1]) < args.stop_thresh:
+                n_stop_seen += 1
+                if n_stop_seen % args.keep_stop_every != 0:
+                    continue
+                n_stop_kept += 1
             items.append({"img": f"frames/{t:06d}.jpg", "speed": float(speeds[t]),
                           "waypoints": wp.tolist()})
 
@@ -143,7 +151,8 @@ def main():
         nval = int(len(items) * args.val_frac)
         json.dump(items[nval:], open(os.path.join(OUT, "index_train.json"), "w"))
         json.dump(items[:nval], open(os.path.join(OUT, "index_val.json"), "w"))
-        print(f"DONE: {len(items)} samples (train {len(items)-nval}, val {nval}) -> {OUT}")
+        print(f"DONE: {len(items)} samples (train {len(items)-nval}, val {nval}) | "
+              f"stopped kept {n_stop_kept}/{n_stop_seen} ({100*n_stop_kept/max(len(items),1):.0f}% of set) -> {OUT}")
     finally:
         for a in reversed(actors):
             try:
