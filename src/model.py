@@ -23,10 +23,12 @@ class TrajectoryPolicy(nn.Module):
         use_speed: bool = True,
         pretrained: bool = True,
         feat_dim: int = 256,
+        n_lang: int = 0,
     ):
         super().__init__()
         self.n_waypoints = n_waypoints
         self.use_speed = use_speed
+        self.n_lang = n_lang
 
         # timm backbone as a pooled feature extractor (num_classes=0 -> global pooled vec)
         self.backbone = timm.create_model(backbone, pretrained=pretrained, num_classes=0)
@@ -44,6 +46,11 @@ class TrajectoryPolicy(nn.Module):
         self.feat_dim = feat_dim
         # predict dx,dy per waypoint in ego frame (x fwd, y left), meters
         self.head = nn.Linear(feat_dim, n_waypoints * 2)
+        # OPTION C: a *parallel* language head reading the same feat (deliberately decoupled
+        # from the trajectory head — it narrates, it does not drive the action). n_lang>0 enables it.
+        self.lang_head = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim), nn.GELU(), nn.Linear(feat_dim, n_lang)
+        ) if n_lang > 0 else None
 
     def forward(self, image: torch.Tensor, speed: torch.Tensor | None = None):
         f = self.backbone(image)  # (B, b_dim)
@@ -53,7 +60,10 @@ class TrajectoryPolicy(nn.Module):
             f = torch.cat([f, speed.view(-1, 1)], dim=1)
         feat = self.neck(f)
         wp = self.head(feat).view(-1, self.n_waypoints, 2)
-        return {"waypoints": wp, "feat": feat}
+        out = {"waypoints": wp, "feat": feat}
+        if self.lang_head is not None:
+            out["lang_logits"] = self.lang_head(feat)  # (B, n_lang)
+        return out
 
 
 def build_model(cfg: dict) -> TrajectoryPolicy:
@@ -63,6 +73,7 @@ def build_model(cfg: dict) -> TrajectoryPolicy:
         use_speed=cfg.get("use_speed", True),
         pretrained=cfg.get("pretrained", True),
         feat_dim=cfg.get("feat_dim", 256),
+        n_lang=cfg.get("n_lang", 0),
     )
 
 

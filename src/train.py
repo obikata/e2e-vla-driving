@@ -63,8 +63,15 @@ def main():
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--lr", type=float, default=None)
     ap.add_argument("--tag", default="", help="checkpoint name suffix, e.g. 'carla' -> best_carla.pt")
+    ap.add_argument("--n-lang", type=int, default=0, help="enable parallel language head with N labels (option C)")
+    ap.add_argument("--lang-weight", type=float, default=1.0, help="weight of the language BCE loss")
+    ap.add_argument("--no-mirror", action="store_true", help="disable mirror aug (v0/v1 reproduction)")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    if args.n_lang:
+        cfg["n_lang"] = args.n_lang
+    if args.no_mirror:
+        cfg["mirror_aug"] = False
     if args.data_root:
         cfg["data_root"] = args.data_root
     if args.epochs:
@@ -84,11 +91,19 @@ def main():
     val_ld = DataLoader(val_ds, batch_size=cfg["batch_size"], shuffle=False,
                         num_workers=4, pin_memory=True)
 
+    # language class imbalance: pos_weight = neg/pos per label (so rare 'stop' actually fires)
+    lang_pw = None
+    if cfg.get("n_lang", 0) and "lang" in train_ds.items[0]:
+        L = torch.tensor([r["lang"] for r in train_ds.items], dtype=torch.float32)
+        pos = L.sum(0).clamp(min=1.0)
+        lang_pw = ((len(L) - pos) / pos).to(device)
+        print("lang pos_weight:", [round(x, 1) for x in lang_pw.tolist()])
+
     model = build_model(cfg).to(device)
     if args.init:
         sd = torch.load(args.init, map_location=device)["model"]
-        model.load_state_dict(sd)
-        print(f"warm-started from {args.init}")
+        missing, _ = model.load_state_dict(sd, strict=False)  # new lang_head stays random
+        print(f"warm-started from {args.init}" + (f" (new: {missing})" if missing else ""))
     opt = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg.get("wd", 1e-4))
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=cfg["lr"], epochs=cfg["epochs"], steps_per_epoch=len(train_ld))
@@ -106,6 +121,10 @@ def main():
             with torch.amp.autocast("cuda"):
                 out = model(img, spd)
                 loss = masked_traj_loss(out["waypoints"], tgt, val)
+                if "lang" in b and "lang_logits" in out:  # option C parallel language head
+                    loss = loss + args.lang_weight * F.binary_cross_entropy_with_logits(
+                        out["lang_logits"], b["lang"].to(device, non_blocking=True),
+                        pos_weight=lang_pw)
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.step(opt)

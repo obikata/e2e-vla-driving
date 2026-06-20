@@ -43,7 +43,11 @@ class CoVLATrajectory(Dataset):
         x = self.transform(img)
         speed = torch.tensor(r["speed"], dtype=torch.float32)
         valid = torch.ones(wp.size(0), dtype=torch.float32)
-        return {"image": x, "speed": speed, "waypoints": wp, "valid": valid}
+        item = {"image": x, "speed": speed, "waypoints": wp, "valid": valid}
+        # OPTION C language labels (red/green/should_stop); mirror flip leaves them unchanged
+        if "lang" in r:
+            item["lang"] = torch.tensor(r["lang"], dtype=torch.float32)
+        return item
 
 
 def make_transform(backbone, train):
@@ -58,7 +62,8 @@ def build_datasets(cfg):
     # keep geometry intact for trajectory labels: avoid flips/crops that change the path
     train_tf = make_transform(backbone, train=False)
     val_tf = make_transform(backbone, train=False)
-    train = CoVLATrajectory(root, "index_train.json", train_tf, augment=True)
+    mirror = cfg.get("mirror_aug", True)  # v0/v1 used False; v2+ use True (kills L/R bias)
+    train = CoVLATrajectory(root, "index_train.json", train_tf, augment=mirror)
     val = CoVLATrajectory(root, "index_val.json", val_tf, augment=False)
     return train, val
 
